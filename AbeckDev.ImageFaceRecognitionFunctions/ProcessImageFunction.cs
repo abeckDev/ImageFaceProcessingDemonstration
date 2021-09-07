@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using Microsoft.Azure.CognitiveServices.Vision.ComputerVision;
 using Microsoft.Azure.CognitiveServices.Vision.ComputerVision.Models;
+using Azure.Storage.Blobs;
 using AbeckDev.ImageFaceRecognitionFunctions.Services;
 
 namespace AbeckDev.ImageFaceRecognitionFunctions
@@ -23,6 +24,14 @@ namespace AbeckDev.ImageFaceRecognitionFunctions
             //In production setup at least the key needs to be secured via a Vault System like Azure Key Vault
             string COMPUTE_VISION_KEY = System.Environment.GetEnvironmentVariable("VISION_SUBSCRIPTION_KEY");
             string COMPUTE_VISION_ENDPOINT = System.Environment.GetEnvironmentVariable("VISION_API_ENDPOINT");
+
+            //Get Tabkle Storage Client
+            var tableStorageService = new TableStorageService();
+            //Get StorageAccount Client
+            BlobServiceClient storageAccountClient = new BlobServiceClient(System.Environment.GetEnvironmentVariable("AzureWebJobsStorage"));
+            var incomingBlobClient = storageAccountClient.GetBlobContainerClient("imagestoprocess");
+            var outgoingBlobClient = storageAccountClient.GetBlobContainerClient("processedimages");
+
 
             //Authenticate with Vision API
             ComputerVisionClient visionClient = new ComputerVisionClient(new Microsoft.Azure.CognitiveServices.Vision.ComputerVision.ApiKeyServiceClientCredentials(COMPUTE_VISION_KEY))
@@ -63,8 +72,20 @@ namespace AbeckDev.ImageFaceRecognitionFunctions
 
                 }
 
-                //No people could be detected
+                //No people could be detected (if not hit before ;) )
                 var debug3 = "No person or Faces detected!";
+
+                //Write Results to Table storage
+                var metaInformation = tableStorageService.WriteImageMetada(visionResult, name);
+
+
+                //Write Picture to the new location
+                var download = await incomingBlobClient.GetBlobClient(name).DownloadContentAsync();
+                await outgoingBlobClient.UploadBlobAsync(metaInformation.FileName,download.Value.Content);
+
+
+                //Clean up in the incoming images blob container
+                await incomingBlobClient.DeleteBlobIfExistsAsync(name);
             }
             catch (Exception ex)
             {
